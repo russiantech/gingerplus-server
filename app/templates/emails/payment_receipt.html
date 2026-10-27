@@ -1,0 +1,5 @@
+{% extends "base.html" %}{% block content %}
+<h2 style="margin:0 0 8px">Payment received</h2>
+<p>Thank you{% if payment.payer_name %}, {{ payment.payer_name }}{% endif %}. We received <strong>&#8358;{{ '{:,.2f}'.format(payment.amount) }}</strong>.</p>
+<p>Reference: <strong>{{ payment.reference }}</strong>{% if order_number %}<br>Order: <strong>{{ order_number }}</strong>{% endif %}</p>
+{% endblock %}

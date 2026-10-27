@@ -1,0 +1,12 @@
+{% extends "base.html" %}{% block content %}
+<h2 style="margin:0 0 8px">Thank you, {{ order.customer_name }}!</h2>
+<p>We've received your order <strong>{{ order.number }}</strong>.</p>
+<table width="100%" cellpadding="6" style="border-collapse:collapse;font-size:14px">
+{% for i in order.items %}<tr style="border-bottom:1px solid #f1e6cf"><td>{{ i.product_name }}<br><span style="color:#8a7352">{{ i.variant_label }} &times; {{ i.quantity }}</span></td><td align="right">&#8358;{{ '{:,.2f}'.format(i.line_total) }}</td></tr>{% endfor %}
+<tr><td align="right">Delivery</td><td align="right">&#8358;{{ '{:,.2f}'.format(order.delivery_fee) }}</td></tr>
+{% if order.discount_total > 0 %}<tr><td align="right">Discount</td><td align="right">-&#8358;{{ '{:,.2f}'.format(order.discount_total) }}</td></tr>{% endif %}
+<tr><td align="right"><strong>Total</strong></td><td align="right"><strong>&#8358;{{ '{:,.2f}'.format(order.total) }}</strong></td></tr></table>
+<p>Payment status: <strong>{{ order.payment_status.value|replace('_',' ')|title }}</strong></p>
+{% if bank_details %}<p style="background:#fff4d6;padding:12px;border-radius:8px">Pay by bank transfer to <strong>{{ bank_details }}</strong> using <strong>{{ order.number }}</strong> as reference, then send proof on WhatsApp.</p>{% endif %}
+<p><a href="{{ site_url }}/track-order?number={{ order.number }}" style="background:#e8a317;color:#3a2a14;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:700">Track your order</a></p>
+{% endblock %}
