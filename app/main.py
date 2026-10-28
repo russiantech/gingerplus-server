@@ -1,70 +1,10 @@
-# import logging
-# from contextlib import asynccontextmanager
-# from pathlib import Path
-
-# from fastapi import FastAPI, Request
-# from fastapi.middleware.cors import CORSMiddleware
-# from fastapi.responses import JSONResponse
-# from fastapi.staticfiles import StaticFiles
-
-# from app.api.router import api_router
-# from app.core.config import settings
-# from app.core.exceptions import register_exception_handlers
-# from app.core.logging import setup_logging
-# from app.core.redis import close_redis, get_redis
-
-# log = logging.getLogger("app")
-
-
-# @asynccontextmanager
-# async def lifespan(_: FastAPI):
-#     setup_logging(settings.DEBUG)
-#     try:
-#         await get_redis().ping()
-#     except Exception:  # pragma: no cover
-#         log.warning("Redis is not reachable — registration & sessions will fail until it is up.")
-#     Path(settings.UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
-#     yield
-#     await close_redis()
-
-
-# def create_app() -> FastAPI:
-#     app = FastAPI(title=settings.APP_NAME, version="1.0.0", lifespan=lifespan,
-#                   docs_url=None if settings.is_production else "/docs", redoc_url=None, openapi_url=f"{settings.API_V1_PREFIX}/openapi.json")
-#     app.add_middleware(CORSMiddleware, allow_origins=settings.CORS_ORIGINS, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
-#     register_exception_handlers(app)
-
-#     @app.middleware("http")
-#     async def security_headers(request: Request, call_next):
-#         resp = await call_next(request)
-#         resp.headers.setdefault("X-Content-Type-Options", "nosniff")
-#         resp.headers.setdefault("X-Frame-Options", "DENY")
-#         resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
-#         return resp
-
-#     @app.get("/health", tags=["system"])
-#     async def health():
-#         return {"status": "ok", "service": settings.APP_NAME}
-
-#     app.include_router(api_router, prefix=settings.API_V1_PREFIX)
-#     static_dir = Path(__file__).parent / "static"
-#     static_dir.mkdir(exist_ok=True)
-#     Path(settings.UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
-#     app.mount("/static", StaticFiles(directory=static_dir), name="static")
-#     return app
-
-
-# app = create_app()
-
-
-
-# v2
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.router import api_router
@@ -76,49 +16,37 @@ from app.core.redis import close_redis, get_redis
 log = logging.getLogger("app")
 
 
-def _ensure_dir(path: Path) -> bool:
-    """Create a directory if possible; never crash the app over it."""
-    try:
-        path.mkdir(parents=True, exist_ok=True)
-        return True
-    except OSError as exc:  # read-only filesystem on serverless
-        log.warning("Could not create %s: %s", path, exc)
-        return False
-
-
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     setup_logging(settings.DEBUG)
     try:
-        await get_redis().ping()
+        if not await get_redis().ping():
+            log.warning("Redis is not reachable — using the in-memory fallback (single instance only).")
     except Exception:  # pragma: no cover
-        log.warning("Redis is not reachable — registration & sessions will fail until it is up.")
-    _ensure_dir(Path(settings.UPLOAD_DIR))
+        log.warning("Redis check failed — using the in-memory fallback.")
+    if settings.AUTO_SEED:
+        try:
+            from app.db.init_db import seed_all
+            await seed_all()
+        except Exception:  # never block startup on seeding
+            log.exception("Auto-seed failed (continuing)")
     yield
     await close_redis()
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(
-        title=settings.APP_NAME,
-        version="1.0.0",
-        lifespan=lifespan,
-        docs_url=None if settings.is_production else "/docs",
-        redoc_url=None,
-        openapi_url=f"{settings.API_V1_PREFIX}/openapi.json",
-    )
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.CORS_ORIGINS,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    app = FastAPI(title=settings.APP_NAME, version="1.0.0", lifespan=lifespan,
+                  docs_url=None if settings.is_production else "/docs", redoc_url=None, openapi_url=f"{settings.API_V1_PREFIX}/openapi.json")
+    app.add_middleware(CORSMiddleware, allow_origins=settings.CORS_ORIGINS, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
     register_exception_handlers(app)
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
-        resp = await call_next(request)
+        try:
+            resp = await call_next(request)
+        except Exception:  # returned inside CORS middleware so browsers still see a readable JSON error
+            log.exception("Unhandled error on %s %s", request.method, request.url.path)
+            resp = JSONResponse(status_code=500, content={"detail": "Something went wrong on our side. Please try again.", "code": "server_error"})
         resp.headers.setdefault("X-Content-Type-Options", "nosniff")
         resp.headers.setdefault("X-Frame-Options", "DENY")
         resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
@@ -129,14 +57,15 @@ def create_app() -> FastAPI:
         return {"status": "ok", "service": settings.APP_NAME}
 
     app.include_router(api_router, prefix=settings.API_V1_PREFIX)
-
-    # Static files shipped with the repo: mount only if the folder exists.
     static_dir = Path(__file__).parent / "static"
+    try:  # read-only filesystems (Vercel/Lambda) can't create directories — that must not stop the app
+        static_dir.mkdir(exist_ok=True)
+        Path(settings.UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
+    except OSError:
+        log.warning("Filesystem is read-only; local uploads disabled (configure STORAGE_BACKEND).")
     if static_dir.is_dir():
         app.mount("/static", StaticFiles(directory=static_dir), name="static")
-
     return app
 
 
 app = create_app()
-

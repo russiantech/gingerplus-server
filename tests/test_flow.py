@@ -43,8 +43,11 @@ async def test_catalog_quote_checkout_and_payment(client):
 
     # tracking needs number + email
     assert (await client.post(f"{API}/orders/track", json={"number": order["number"], "email": "wrong@x.com"})).status_code == 404
-    # mock gateway settles on verify
-    v = (await client.get(f"{API}/payments/verify/{data['payment_reference']}")).json()
+    # mock gateway: the in-app test popup "pays", then the browser asks the backend to verify
+    assert data["payment"]["provider"] == "mock" and data["payment"]["mock"]
+    assert (await client.get(f"{API}/payments/verify/{data['payment_reference']}")).json()["status"] == "pending"
+    await client.post(f"{API}/payments/mock/complete", json={"reference": data["payment_reference"], "outcome": "success"})
+    v = (await client.post(f"{API}/payments/verify", json={"reference": data["payment_reference"]})).json()
     assert v["status"] == "paid"
     t = (await client.post(f"{API}/orders/track", json={"number": order["number"], "email": "guest@example.com"})).json()
     assert t["payment_status"] == "paid" and t["status"] == "confirmed"
@@ -71,6 +74,7 @@ async def test_contact_inbox_direct_payment_and_permissions(client):
     assert mails["total"] == 1 and mails["items"][0]["user_id"] is None
     d = await client.post(f"{API}/payments/direct", json={"name": "Bar Owner", "email": "bar@example.com", "amount": 50000})
     assert d.status_code == 201
+    await client.post(f"{API}/payments/mock/complete", json={"reference": d.json()["reference"], "outcome": "success"})
     assert (await client.get(f"{API}/payments/verify/{d.json()['reference']}")).json()["status"] == "paid"
     # customer cannot reach admin
     with patch("app.services.auth_service.generate_numeric_code", return_value="111111"):

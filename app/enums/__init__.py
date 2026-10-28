@@ -64,6 +64,8 @@ class PaymentMethod(StrEnum):
 
 class PaymentProvider(StrEnum):
     PAYSTACK = "paystack"
+    FLUTTERWAVE = "flutterwave"
+    MOCK = "mock"  # development-only simulated gateway
     MANUAL = "manual"
 
 

@@ -4,7 +4,7 @@ from typing import Annotated, Callable
 import jwt
 from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from redis.asyncio import Redis
+from app.core.redis import ResilientRedis as Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 

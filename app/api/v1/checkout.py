@@ -79,4 +79,4 @@ async def pay_order(data: TrackRequest, db: DB):
     if not o or normalize_email(o.customer_email) != normalize_email(data.email):
         raise NotFound("We couldn't find an order with those details.", code="order_not_found")
     p = await payment_service.init_for_order(db, o)
-    return InitPaymentResponse(reference=p.reference, authorization_url=p.authorization_url, access_code=p.access_code, amount=float(p.amount))
+    return payment_service.init_response(p)

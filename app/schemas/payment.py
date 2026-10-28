@@ -19,10 +19,86 @@ class DirectPaymentRequest(BaseModel):
 
 
 class InitPaymentResponse(BaseModel):
+    """Everything the browser needs to open the provider's in-page popup. Secrets never appear here (public key only)."""
     reference: str
-    authorization_url: str
+    provider: str  # paystack | flutterwave | mock
+    authorization_url: str | None = None  # last-resort fallback if the popup script cannot load
     access_code: str | None = None
+    public_key: str | None = None
+    mock: bool = False
     amount: float
+    currency: str = "NGN"
+    email: str | None = None
+    name: str | None = None
+    phone: str | None = None
+    description: str | None = None
+
+
+class VerifyRequest(BaseModel):
+    reference: str
+
+
+class MockCompleteRequest(BaseModel):
+    reference: str
+    outcome: str = "success"  # success | failed
+
+
+class OnlineConfig(BaseModel):
+    available: bool
+    provider: str | None = None
+    mock: bool = False
+
+
+class BankDetails(BaseModel):
+    bank_name: str = ""
+    account_name: str = ""
+    account_number: str = ""
+    instructions: str = ""
+
+
+class PaymentConfigOut(BaseModel):
+    online: OnlineConfig
+    bank_transfer: BankDetails | None = None
+
+
+class ProviderUpdate(BaseModel):
+    display_name: str | None = None
+    is_enabled: bool | None = None
+    mode: str | None = None
+    public_key: str | None = None
+    secret_key: str | None = None  # write-only; blank/omitted = keep the stored secret
+    clear_secret: bool = False
+    webhook_secret: str | None = None
+    clear_webhook_secret: bool = False
+    extra: dict[str, str] | None = None
+
+
+class ProviderOut(BaseModel):
+    provider: str
+    display_name: str
+    kind: str
+    blurb: str
+    is_enabled: bool
+    is_default: bool
+    mode: str
+    public_key: str | None = None
+    has_secret: bool
+    secret_masked: str | None = None
+    secret_fingerprint: str | None = None
+    has_webhook_secret: bool
+    needs_reentry: bool = False
+    extra: dict = {}
+    env_available: bool
+    source: str  # database | environment | none
+    active: bool
+    webhook_url: str | None = None
+    updated_at: datetime | None = None
+
+
+class TestResult(BaseModel):
+    ok: bool
+    message: str
+    source: str
 
 
 class PaymentOut(ORM):
@@ -52,6 +128,7 @@ class PaymentPublicStatus(BaseModel):
     amount: float
     order_number: str | None = None
     paid_at: datetime | None = None
+    message: str | None = None
 
 
 class ManualConfirm(BaseModel):

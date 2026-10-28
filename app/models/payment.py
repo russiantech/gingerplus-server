@@ -34,3 +34,20 @@ class Payment(Entity, Base):
     admin_note: Mapped[str | None] = mapped_column(Text)
 
     order: Mapped["Order | None"] = relationship(back_populates="payments")  # noqa: F821
+
+
+class PaymentProviderConfig(Entity, Base):
+    """Admin-managed gateway credentials / bank details. Secrets are stored encrypted (see app.core.crypto)."""
+    __tablename__ = "payment_providers"
+
+    provider: Mapped[str] = mapped_column(String(32), unique=True, index=True)  # paystack | flutterwave | bank_transfer
+    display_name: Mapped[str | None] = mapped_column(String(80))
+    is_enabled: Mapped[bool] = mapped_column(default=False)
+    is_default: Mapped[bool] = mapped_column(default=False)
+    mode: Mapped[str] = mapped_column(String(8), default="test")  # test | live
+    public_key: Mapped[str | None] = mapped_column(String(255))
+    secret_key_enc: Mapped[str | None] = mapped_column(Text)
+    webhook_secret_enc: Mapped[str | None] = mapped_column(Text)
+    secret_fingerprint: Mapped[str | None] = mapped_column(String(32))  # SHA-256 prefix, display/change-detection only
+    extra: Mapped[dict] = mapped_column(JSON, default=dict)  # e.g. bank_name / account_number / instructions
+    updated_by_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("users.id", ondelete="SET NULL"))

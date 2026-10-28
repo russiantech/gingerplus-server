@@ -11,8 +11,9 @@ from app.core.config import settings
 from app.core.exceptions import AppError, NotFound, PaymentError
 from app.enums import OrderStatus, PaymentProvider, PaymentPurpose, PaymentStatus
 from app.models import Order, Payment, User
-from app.schemas.payment import DirectPaymentRequest
-from app.services import order_service, paystack_service
+from app.schemas.payment import DirectPaymentRequest, InitPaymentResponse
+from app.services import order_service, provider_service
+from app.services.gateways.base import VerifyResult
 from app.services.email_service import notify_admin, send_email
 from app.utils.text import normalize_email, normalize_phone
 
@@ -28,12 +29,22 @@ def _callback() -> str:
 
 
 async def _init_gateway(db: AsyncSession, payment: Payment, metadata: dict) -> Payment:
-    data = await paystack_service.initialize(email=payment.email, amount=payment.amount, reference=payment.reference,
-                                             callback_url=_callback(), metadata=metadata)
-    payment.authorization_url = data["authorization_url"]
-    payment.access_code = data.get("access_code")
+    """Backend → provider: create the transaction. The browser then opens the provider's popup using the returned access code."""
+    gateway = await provider_service.active_online_gateway(db)
+    payment.provider = PaymentProvider(gateway.name)
+    init = await gateway.initialize(payment, _callback(), metadata)
+    payment.authorization_url = init.authorization_url
+    payment.access_code = init.access_code
+    payment.gateway_payload = {**(payment.gateway_payload or {}), "public_key": init.public_key}
     await db.flush()
     return payment
+
+
+def init_response(p: Payment) -> InitPaymentResponse:
+    return InitPaymentResponse(
+        reference=p.reference, provider=p.provider.value, authorization_url=p.authorization_url, access_code=p.access_code,
+        public_key=(p.gateway_payload or {}).get("public_key"), mock=p.provider == PaymentProvider.MOCK, amount=float(p.amount),
+        currency=p.currency, email=p.email, name=p.payer_name, phone=p.phone, description=p.description)
 
 
 async def init_for_order(db: AsyncSession, order: Order, user: User | None = None) -> Payment:
@@ -131,60 +142,72 @@ async def mark_failed(db: AsyncSession, payment: Payment, reason: str | None = N
 
 
 async def verify_reference(db: AsyncSession, reference: str, *, actor: User | None = None) -> Payment:
-    """Verify with Paystack (source of truth) and settle the payment."""
+    """Backend → provider: ask the provider (source of truth) for the transaction state, then settle the payment/order."""
     payment = await get_by_reference(db, reference, lock=True)
     if not payment:
         raise NotFound("Payment not found.")
     if payment.status == PaymentStatus.PAID:
         return payment
-    if paystack_service.is_mock_mode():
-        # dev-only simulated gateway; the callback adds mock=1 and the client calls /payments/verify
-        return await mark_paid(db, payment, gateway_data={"channel": "mock", "gateway_response": "Mock payment (dev)"}, actor=actor)
-    data = await paystack_service.verify(reference)
-    return await _settle_from_gateway(db, payment, data, actor)
+    if payment.provider == PaymentProvider.MANUAL:
+        return payment
+    gateway = await provider_service.gateway_for(db, payment.provider.value)
+    return await _settle(db, payment, await gateway.verify(payment), actor)
 
 
-async def _settle_from_gateway(db: AsyncSession, payment: Payment, data: dict, actor: User | None = None) -> Payment:
-    status = data.get("status")
-    if status == "success":
-        if int(data.get("amount", 0)) != paystack_service.to_kobo(payment.amount) or data.get("currency", "NGN") != payment.currency:
+async def _settle(db: AsyncSession, payment: Payment, result: VerifyResult, actor: User | None = None) -> Payment:
+    if result.status == "success":
+        if result.amount is not None and (Decimal(result.amount) != Decimal(payment.amount) or result.currency != payment.currency):
             payment.gateway_response = "Amount mismatch — flagged for review"
-            payment.gateway_payload = data
-            log.error("amount mismatch for %s: %s vs %s", payment.reference, data.get("amount"), payment.amount)
+            payment.gateway_payload = {**(payment.gateway_payload or {}), "mismatch": result.raw}
+            log.error("amount mismatch for %s: %s vs %s", payment.reference, result.amount, payment.amount)
             raise PaymentError("Payment amount mismatch. Our team has been notified.", code="amount_mismatch")
-        return await mark_paid(db, payment, gateway_data=data, actor=actor)
-    if status in ("failed", "abandoned", "reversed"):
-        await mark_failed(db, payment, data.get("gateway_response") or status)
+        return await mark_paid(db, payment, gateway_data={**result.payload(payment.provider.value), "public_key": (payment.gateway_payload or {}).get("public_key")}, actor=actor)
+    if result.status == "failed":
+        await mark_failed(db, payment, result.gateway_response or "failed")
     else:
-        payment.gateway_response = data.get("gateway_response") or status
+        payment.gateway_response = result.gateway_response or "pending"
     return payment
 
 
-async def handle_webhook(db: AsyncSession, event: dict) -> None:
-    name, data = event.get("event"), event.get("data") or {}
-    ref = data.get("reference")
-    if not ref:
+async def handle_webhook(db: AsyncSession, provider: str, event: dict) -> None:
+    gateway = await provider_service.gateway_for(db, provider)
+    ev = gateway.parse_webhook(event)
+    if not ev.reference or ev.kind == "ignore":
         return
-    payment = await get_by_reference(db, ref, lock=True)
+    payment = await get_by_reference(db, ev.reference, lock=True)
     if not payment:
-        log.warning("webhook for unknown reference %s", ref)
+        log.warning("webhook for unknown reference %s", ev.reference)
         return
-    if name == "charge.success":
-        await _settle_from_gateway(db, payment, data)
-    elif name in ("charge.failed",):
-        await mark_failed(db, payment, data.get("gateway_response"))
-    elif name in ("refund.processed",) and payment.status == PaymentStatus.PAID:
+    if ev.kind == "success":
+        # never trust the body alone for providers that recommend it: re-verify with the API
+        result = ev.result if provider == "paystack" and ev.result else await gateway.verify(payment)
+        await _settle(db, payment, result)
+    elif ev.kind == "failed":
+        await mark_failed(db, payment, ev.result.gateway_response if ev.result else None)
+    elif ev.kind == "refund" and payment.status == PaymentStatus.PAID:
         payment.status = PaymentStatus.REFUNDED
         if payment.order_id:
             order = await order_service.get_order(db, payment.order_id)
             order.payment_status = PaymentStatus.REFUNDED
 
 
+async def mock_complete(db: AsyncSession, reference: str, outcome: str) -> Payment:
+    """Dev-only: simulate the customer finishing (or failing) the mock popup. The normal verify call then settles it."""
+    if settings.is_production:
+        raise NotFound("Not found.")
+    payment = await get_by_reference(db, reference, lock=True)
+    if not payment or payment.provider != PaymentProvider.MOCK:
+        raise NotFound("Payment not found.")
+    payment.gateway_payload = {**(payment.gateway_payload or {}), "mock_outcome": "success" if outcome == "success" else "failed"}
+    await db.flush()
+    return payment
+
+
 async def admin_confirm(db: AsyncSession, payment: Payment, actor: User, *, note: str | None = None, manual: bool = False) -> Payment:
     """Admin 'try to confirm': re-verify with the gateway; if unresolved and manual=True accept bank-transfer style confirmation."""
     if payment.status == PaymentStatus.PAID:
         return payment
-    if payment.provider == PaymentProvider.PAYSTACK and not manual:
+    if payment.provider != PaymentProvider.MANUAL and not manual:
         return await verify_reference(db, payment.reference, actor=actor)
     return await mark_paid(db, payment, actor=actor, note=note, provider_label="Manually confirmed by admin")
 

@@ -258,4 +258,3 @@ CATEGORIES = [
 LAGOS = {"Lagos": (2500, 1, 2)}
 SW = {s: (3500, 2, 3) for s in ["Ogun", "Oyo", "Osun", "Ondo", "Ekiti"]}
 REMOTE = {s: (7500, 5, 7) for s in ["Borno", "Yobe", "Adamawa", "Taraba", "Sokoto", "Zamfara", "Kebbi", "Bayelsa"]}
-

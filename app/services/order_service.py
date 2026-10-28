@@ -178,8 +178,15 @@ async def set_status(db: AsyncSession, order: Order, status: OrderStatus, *, not
 
 
 async def notify_order_created(db: AsyncSession, order: Order) -> None:
-    commerce = await get_setting(db, "commerce")
-    bank = commerce.get("bank_details") if order.payment_method == PaymentMethod.BANK_TRANSFER else None
+    bank = None
+    if order.payment_method == PaymentMethod.BANK_TRANSFER:
+        from app.services import provider_service
+        row = await provider_service.get_row(db, "bank_transfer")
+        if row and row.is_enabled and (row.extra or {}).get("account_number"):  # structured details saved by the admin
+            e = row.extra
+            bank = f"{e.get('bank_name', '')} · {e.get('account_name', '')} · {e.get('account_number', '')}" + (f" ({e['instructions']})" if e.get("instructions") else "")
+        else:
+            bank = (await get_setting(db, "commerce")).get("bank_details")
     await send_email(db, order.customer_email, f"We received your order {order.number}", "order_confirmation.html",
                      order=order, bank_details=bank, order_id=order.id)
     await notify_admin(db, f"New order {order.number} — ₦{order.total:,.0f}",

@@ -14,3 +14,4 @@ Jinja2==3.1.5
 python-multipart==0.0.20
 python-slugify==8.0.4
 user-agents==2.2.0
+cryptography>=43.0.0

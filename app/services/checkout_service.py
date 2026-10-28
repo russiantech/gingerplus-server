@@ -27,6 +27,7 @@ async def checkout(db: AsyncSession, data: CheckoutRequest, user: User | None) -
     contact = await get_setting(db, "contact")
     wa_number = (contact.get("whatsapp_numbers") or [settings.WHATSAPP_NUMBER])[0]
     auth_url = reference = None
+    init = None
     wa_url = order_whatsapp_url(order, wa_number)
     next_step = "confirmation"
 
@@ -34,6 +35,7 @@ async def checkout(db: AsyncSession, data: CheckoutRequest, user: User | None) -
         try:
             payment = await payment_service.init_for_order(db, order, user)
             auth_url, reference, next_step = payment.authorization_url, payment.reference, "pay_online"
+            init = payment_service.init_response(payment)
         except PaymentError:
             log.exception("gateway init failed for %s", order.number)
             next_step = "retry_payment"
@@ -44,9 +46,5 @@ async def checkout(db: AsyncSession, data: CheckoutRequest, user: User | None) -
     await order_service.notify_order_created(db, order)
     await db.refresh(order)
     from app.schemas.order import OrderOut
-    return CheckoutResponse(
-        order=OrderOut.model_validate(order), 
-        authorization_url=auth_url, 
-        payment_reference=reference,
-        whatsapp_url=wa_url, next_step=next_step
-    )
+    return CheckoutResponse(order=OrderOut.model_validate(order), authorization_url=auth_url, payment_reference=reference, payment=init,
+                            whatsapp_url=wa_url, next_step=next_step)

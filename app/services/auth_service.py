@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 
 import jwt
-from redis.asyncio import Redis
+from app.core.redis import ResilientRedis as Redis
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 

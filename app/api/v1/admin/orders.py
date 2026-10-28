@@ -56,13 +56,12 @@ async def create_order(data: AdminOrderCreate, db: DB, actor: CurrentUser):
     payment = None
     if data.mark_paid:
         payment = await payment_service.record_manual_payment(db, order, order.total, actor, "Marked paid at order creation", data.payment_method.value)
-    elif data.payment_method == PaymentMethod.PAYSTACK:
-        payment = await payment_service.init_for_order(db, order)
+    # Online payments by a customer are started by the customer themselves (track-order / pay-now popup), so nothing is
+    # created at the gateway here — this also keeps order creation working if the gateway is temporarily unavailable.
     await order_service.notify_order_created(db, order)
     await db.refresh(order)
     step = "confirmation" if data.mark_paid else ("pay_online" if data.payment_method == PaymentMethod.PAYSTACK else data.payment_method.value)
-    return CheckoutResponse(order=OrderOut.model_validate(order), authorization_url=None if data.mark_paid else (payment.authorization_url if payment else None),
-                            payment_reference=payment.reference if payment else None, next_step=step)
+    return CheckoutResponse(order=OrderOut.model_validate(order), payment_reference=payment.reference if payment else None, next_step=step)
 
 
 @router.get("/orders/{order_id}", response_model=AdminOrderOut, dependencies=[view])

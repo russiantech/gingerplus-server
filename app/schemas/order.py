@@ -6,6 +6,7 @@ from pydantic import BaseModel, EmailStr, Field
 
 from app.enums import (AssignmentStatus, OrderChannel, OrderStatus, PaymentMethod, PaymentStatus)
 from app.schemas.common import ORM, Money
+from app.schemas.payment import InitPaymentResponse
 from app.schemas.user import AddressIn
 
 
@@ -141,6 +142,7 @@ class CheckoutResponse(BaseModel):
     order: OrderOut
     authorization_url: str | None = None
     payment_reference: str | None = None
+    payment: InitPaymentResponse | None = None  # open this in the in-page popup (no redirect)
     whatsapp_url: str | None = None
     next_step: str  # pay_online | whatsapp | bank_transfer | confirmation
 
