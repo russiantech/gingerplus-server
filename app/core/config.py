@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     # Database / cache
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/southern_rose"
     REDIS_URL: str = "redis://localhost:6379/0"
+    DB_NULL_POOL: bool = False  # disable connection pooling for serverless deployments (e.g. Vercel)
 
     # Auth
     SECRET_KEY: str = "change-me-in-production-please-use-a-long-random-string"
