@@ -156,11 +156,17 @@ async def verify_reference(db: AsyncSession, reference: str, *, actor: User | No
 
 async def _settle(db: AsyncSession, payment: Payment, result: VerifyResult, actor: User | None = None) -> Payment:
     if result.status == "success":
-        if result.amount is not None and (Decimal(result.amount) != Decimal(payment.amount) or result.currency != payment.currency):
-            payment.gateway_response = "Amount mismatch — flagged for review"
-            payment.gateway_payload = {**(payment.gateway_payload or {}), "mismatch": result.raw}
-            log.error("amount mismatch for %s: %s vs %s", payment.reference, result.amount, payment.amount)
-            raise PaymentError("Payment amount mismatch. Our team has been notified.", code="amount_mismatch")
+        if result.amount is not None:
+            got, want = int((Decimal(result.amount) * 100).quantize(Decimal("1"))), int((Decimal(payment.amount) * 100).quantize(Decimal("1")))
+            if (result.currency or "NGN").upper() != (payment.currency or "NGN").upper() or got < want:
+                # Underpaid / wrong currency: keep a durable record (the request would otherwise roll back) and refuse to settle.
+                payment.gateway_response = f"Amount mismatch: expected {want / 100:.2f} {payment.currency}, provider reported {got / 100:.2f} {result.currency}"
+                payment.gateway_payload = {**(payment.gateway_payload or {}), "mismatch": result.raw}
+                await db.commit()
+                log.error("amount mismatch for %s: expected %s got %s %s", payment.reference, want, got, result.currency)
+                raise PaymentError("Payment amount mismatch. Our team has been notified.", code="amount_mismatch")
+            if got > want:  # e.g. fees passed to the customer: accept, the order is covered
+                log.info("payment %s settled with provider amount above requested (%s > %s)", payment.reference, got, want)
         return await mark_paid(db, payment, gateway_data={**result.payload(payment.provider.value), "public_key": (payment.gateway_payload or {}).get("public_key")}, actor=actor)
     if result.status == "failed":
         await mark_failed(db, payment, result.gateway_response or "failed")

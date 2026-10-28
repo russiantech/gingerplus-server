@@ -45,7 +45,9 @@ class PaystackGateway(Gateway):
     def _result(data: dict) -> VerifyResult:
         st = data.get("status")
         status = "success" if st == "success" else "failed" if st in ("failed", "abandoned", "reversed") else "pending"
-        amount = Decimal(int(data["amount"])) / 100 if data.get("amount") is not None else None
+        # With "customer pays the fees" enabled, `amount` includes Paystack's fee; `requested_amount` is what we asked for.
+        raw_amount = data.get("requested_amount") or data.get("amount")
+        amount = Decimal(int(raw_amount)) / 100 if raw_amount is not None else None
         return VerifyResult(status=status, amount=amount, currency=data.get("currency", "NGN"), channel=data.get("channel"),
                             gateway_response=data.get("gateway_response") or st, raw=data)
 

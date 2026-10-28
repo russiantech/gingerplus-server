@@ -12,7 +12,7 @@ from app.db.session import engine
 from tests.test_flow import API, admin_headers
 
 REQUESTS: list[httpx.Request] = []
-STATE = {"paystack_status": "success", "paystack_amount": None, "fw_status": "successful"}
+STATE = {"paystack_status": "success", "paystack_amount": None, "paystack_requested": None, "fw_status": "successful"}
 
 
 def handler(request: httpx.Request) -> httpx.Response:
@@ -25,7 +25,7 @@ def handler(request: httpx.Request) -> httpx.Response:
         if path.startswith("/transaction/verify/"):
             ref = path.rsplit("/", 1)[1]
             amount = STATE["paystack_amount"] or int(PAID[ref] * 100)
-            return httpx.Response(200, json={"status": True, "data": {"status": STATE["paystack_status"], "amount": amount, "currency": "NGN", "channel": "card", "gateway_response": "Successful", "reference": ref}})
+            return httpx.Response(200, json={"status": True, "data": {"status": STATE["paystack_status"], "amount": amount, **({"requested_amount": STATE["paystack_requested"]} if STATE["paystack_requested"] else {}), "currency": "NGN", "channel": "card", "gateway_response": "Successful", "reference": ref}})
         if path == "/transaction":
             return httpx.Response(200, json={"status": True, "data": []})
     if request.url.host == "api.flutterwave.com":
@@ -47,7 +47,7 @@ _real = httpx.AsyncClient
 def fake_gateways(monkeypatch):
     REQUESTS.clear()
     PAID.clear()
-    STATE.update(paystack_status="success", paystack_amount=None, fw_status="successful")
+    STATE.update(paystack_status="success", paystack_amount=None, paystack_requested=None, fw_status="successful")
 
     def factory(*a, **kw):
         kw["transport"] = httpx.MockTransport(handler)
@@ -205,3 +205,14 @@ async def test_mock_gateway_is_unavailable_in_production(client, monkeypatch):
     data = await one_pack_order(client)
     assert data["next_step"] == "retry_payment" and data["payment"] is None
     assert (await client.post(f"{API}/payments/mock/complete", json={"reference": "x", "outcome": "success"})).status_code == 404
+
+
+async def test_customer_pays_fees_amount_is_accepted(client):
+    """Paystack reports amount = requested + fee when fees are passed to the customer; requested_amount must be used."""
+    h = await admin_headers(client)
+    await save_paystack(client, h)
+    data = await one_pack_order(client)
+    base = int(data["payment"]["amount"] * 100)
+    STATE["paystack_amount"] = base + 15000; STATE["paystack_requested"] = base
+    r = await client.post(f"{API}/payments/verify", json={"reference": data["payment"]["reference"]})
+    assert r.status_code == 200 and r.json()["status"] == "paid"
