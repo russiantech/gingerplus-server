@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     API_V1_PREFIX: str = "/api/v1"
     SITE_URL: str = "http://localhost:5173"
     API_URL: str = "http://localhost:8000"
-    CORS_ORIGINS: List[str] = ["http://localhost:5173", "http://localhost:3000"]
+    CORS_ORIGINS: List[str] = ["", "http://localhost:5173", "http://localhost:3000"]
 
     # Database / cache
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/southern_rose"
@@ -49,14 +49,6 @@ class Settings(BaseSettings):
     PAYSTACK_PUBLIC_KEY: str = ""
     PAYSTACK_BASE_URL: str = "https://api.paystack.co"
     PAYSTACK_CALLBACK_PATH: str = "/payment/callback"
-    # Flutterwave (optional second gateway). Admin-saved credentials take precedence over these.
-    FLUTTERWAVE_SECRET_KEY: str = ""
-    FLUTTERWAVE_PUBLIC_KEY: str = ""
-    FLUTTERWAVE_WEBHOOK_SECRET: str = ""  # the "secret hash" configured in the Flutterwave dashboard
-    FLUTTERWAVE_BASE_URL: str = "https://api.flutterwave.com"
-    DEFAULT_ONLINE_PROVIDER: str = ""  # paystack | flutterwave — used when admin has not picked a default
-    # Key used to encrypt provider credentials stored in the database (Fernet). Falls back to a key derived from SECRET_KEY.
-    ENCRYPTION_KEY: str = ""
 
     # Business defaults (overridable by admin through site settings)
     ONLINE_PAYMENT_MAX_PACKS: int = 5  # orders with fewer packs go straight to the gateway
@@ -64,44 +56,19 @@ class Settings(BaseSettings):
     DEFAULT_DELIVERY_FEE: int = 3500
 
     # Seed super admin
+    AUTO_SEED: bool = True
     FIRST_SUPERUSER_EMAIL: str = "admin@southernrose.ng"
     FIRST_SUPERUSER_PASSWORD: str = "ChangeMe123!"
 
     # Uploads
     UPLOAD_DIR: str = "app/static/uploads"
     MAX_UPLOAD_MB: int = 8
-    STORAGE_BACKEND: str = "auto"  # auto | local | supabase | s3 | vercel_blob
-    SUPABASE_URL: str = ""
-    SUPABASE_SERVICE_KEY: str = ""
-    SUPABASE_BUCKET: str = "uploads"
-    S3_BUCKET: str = ""
-    S3_ACCESS_KEY: str = ""
-    S3_SECRET_KEY: str = ""
-    S3_REGION: str = "auto"
-    S3_ENDPOINT_URL: str = ""  # e.g. https://<account>.r2.cloudflarestorage.com ; empty for AWS
-    S3_PUBLIC_BASE_URL: str = ""  # public/CDN base for stored objects
-    BLOB_READ_WRITE_TOKEN: str = ""
-
-    # Runtime
-    AUTO_SEED: bool = False  # run the idempotent seed at startup (handy on first deploy)
-    DB_NULL_POOL: bool = False  # set true on serverless (auto-enabled when VERCEL is set)
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def _split_origins(cls, v):
         if isinstance(v, str):
             return [o.strip() for o in v.split(",") if o.strip()]
-        return v
-
-    @field_validator("DATABASE_URL", mode="before")
-    @classmethod
-    def _normalise_db_url(cls, v):
-        """Accept the URLs hosted providers hand out (postgres://, postgresql://) and use the async driver."""
-        if isinstance(v, str):
-            if v.startswith("postgres://"):
-                v = "postgresql+asyncpg://" + v[len("postgres://"):]
-            elif v.startswith("postgresql://"):
-                v = "postgresql+asyncpg://" + v[len("postgresql://"):]
         return v
 
     @property
