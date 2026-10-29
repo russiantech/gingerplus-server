@@ -34,10 +34,28 @@ async def lifespan(_: FastAPI):
     await close_redis()
 
 
+class TrailingSlashMiddleware:
+    """Some hosts (Vercel) forward `/api/v1/catalog/products/`. Treat `/x/` and `/x` as the same route instead of 404-ing."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] in ("http", "websocket"):
+            path = scope.get("path", "")
+            if len(path) > 1 and path.endswith("/"):
+                scope = dict(scope)
+                scope["path"] = path.rstrip("/") or "/"
+                if scope.get("raw_path"):
+                    scope["raw_path"] = scope["raw_path"].rstrip(b"/") or b"/"
+        await self.app(scope, receive, send)
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title=settings.APP_NAME, version="1.0.0", lifespan=lifespan,
                   docs_url=None if settings.is_production else "/docs", redoc_url=None, openapi_url=f"{settings.API_V1_PREFIX}/openapi.json")
     app.add_middleware(CORSMiddleware, allow_origins=settings.CORS_ORIGINS, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+    app.add_middleware(TrailingSlashMiddleware)
     register_exception_handlers(app)
 
     @app.middleware("http")

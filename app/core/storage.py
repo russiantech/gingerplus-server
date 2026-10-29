@@ -61,7 +61,11 @@ class SupabaseStorage(Storage):
     name = "supabase"
 
     def __init__(self) -> None:
-        self.base = settings.SUPABASE_URL.rstrip("/")
+        base = settings.SUPABASE_URL.strip().rstrip("/")
+        for tail in ("/rest/v1", "/storage/v1", "/auth/v1"):  # tolerate a pasted API URL; we only need the project root
+            if base.endswith(tail):
+                base = base[: -len(tail)]
+        self.base = base
         self.bucket = settings.SUPABASE_BUCKET
         self.headers = {"Authorization": f"Bearer {settings.SUPABASE_SERVICE_KEY}", "apikey": settings.SUPABASE_SERVICE_KEY}
 
