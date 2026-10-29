@@ -87,7 +87,7 @@ class ResilientRedis:
                 return await getattr(self._primary, name)(*args, **kwargs)
             except Exception as exc:  # connection refused, timeout, auth, DNS … never bubble up to the request
                 self._down_until = time.time() + RETRY_AFTER_SECONDS
-                log.warning("Redis unavailable (%s) — using in-memory fallback for %ss", exc.__class__.__name__, RETRY_AFTER_SECONDS)
+                log.info("Redis unavailable (%s) — using in-memory fallback for %ss", exc.__class__.__name__, RETRY_AFTER_SECONDS)
         return await getattr(self._memory, name)(*args, **kwargs)
 
     async def ping(self) -> bool:
@@ -116,7 +116,9 @@ def get_redis() -> ResilientRedis:
     global _redis
     if _redis is None:
         client = None
-        if settings.REDIS_URL:
+        import os
+        local_default = settings.REDIS_URL.startswith(("redis://localhost", "redis://127.0.0.1"))
+        if settings.REDIS_URL and not (os.getenv("VERCEL") and local_default):  # localhost can never exist on serverless: skip the 2s connect attempt per cold start
             try:
                 client = Redis.from_url(settings.REDIS_URL, decode_responses=True, socket_connect_timeout=2, socket_timeout=2, health_check_interval=30)
             except Exception as exc:

@@ -4,7 +4,9 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.staticfiles import StaticFiles
 
 from app.api.router import api_router
@@ -21,7 +23,7 @@ async def lifespan(_: FastAPI):
     setup_logging(settings.DEBUG)
     try:
         if not await get_redis().ping():
-            log.warning("Redis is not reachable — using the in-memory fallback (single instance only).")
+            log.info("Redis is not reachable — using the in-memory fallback (single instance only).")
     except Exception:  # pragma: no cover
         log.warning("Redis check failed — using the in-memory fallback.")
     if settings.AUTO_SEED:
@@ -43,6 +45,15 @@ class TrailingSlashMiddleware:
     async def __call__(self, scope, receive, send):
         if scope["type"] in ("http", "websocket"):
             path = scope.get("path", "")
+            known = (settings.API_V1_PREFIX, "/health", "/static", "/docs", "/openapi")
+            if scope["type"] == "http" and not path.startswith(known):
+                # Behind some gateways the app receives a rewritten path (e.g. "/" or "/api/index"); recover the real one if the host tells us.
+                hdrs = {k.decode().lower(): v.decode() for k, v in scope.get("headers", [])}
+                for h in ("x-vercel-original-path", "x-original-uri", "x-forwarded-uri", "x-invoke-path", "x-matched-path"):
+                    cand = hdrs.get(h, "").split("?")[0]
+                    if cand.startswith(settings.API_V1_PREFIX):
+                        scope = dict(scope); scope["path"] = path = cand; scope.pop("raw_path", None)
+                        break
             if len(path) > 1 and path.endswith("/"):
                 scope = dict(scope)
                 scope["path"] = path.rstrip("/") or "/"
@@ -56,6 +67,12 @@ def create_app() -> FastAPI:
                   docs_url=None if settings.is_production else "/docs", redoc_url=None, openapi_url=f"{settings.API_V1_PREFIX}/openapi.json")
     app.add_middleware(CORSMiddleware, allow_origins=settings.CORS_ORIGINS, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
     app.add_middleware(TrailingSlashMiddleware)
+
+    @app.exception_handler(StarletteHTTPException)
+    async def _http_exc(request: Request, exc: StarletteHTTPException):
+        if exc.status_code == 404 and exc.detail == "Not Found":  # routing miss: say what path the app actually saw (helps with proxy/rewrite issues)
+            return JSONResponse(status_code=404, content={"detail": "Not Found", "path": request.url.path, "root_path": request.scope.get("root_path", ""), "method": request.method})
+        return await http_exception_handler(request, exc)
     register_exception_handlers(app)
 
     @app.middleware("http")
@@ -80,7 +97,7 @@ def create_app() -> FastAPI:
         static_dir.mkdir(exist_ok=True)
         Path(settings.UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
     except OSError:
-        log.warning("Filesystem is read-only; local uploads disabled (configure STORAGE_BACKEND).")
+        log.info("Filesystem is read-only; local uploads disabled (configure STORAGE_BACKEND).")
     if static_dir.is_dir():
         app.mount("/static", StaticFiles(directory=static_dir), name="static")
     return app
