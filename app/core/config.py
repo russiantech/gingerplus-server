@@ -23,6 +23,7 @@ class Settings(BaseSettings):
 
     # Auth
     SECRET_KEY: str = "change-me-in-production-please-use-a-long-random-string"
+    ENCRYPTION_KEY: str = "change-me-use-openssl-rand-hex-32"
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_MINUTES: int = 30
     REFRESH_TOKEN_DAYS: int = 7
