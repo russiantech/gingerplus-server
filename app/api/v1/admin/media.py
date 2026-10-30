@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, UploadFile
 from app.api.deps import require_staff
 from app.core.config import settings
 from app.core.exceptions import AppError
-from app.core.storage import get_storage
+from app.core.storage import delete_by_url, get_storage
 
 router = APIRouter(prefix="/admin/media", tags=["admin:media"], dependencies=[Depends(require_staff)])
 ALLOWED = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "image/svg+xml": ".svg", "image/gif": ".gif", "application/pdf": ".pdf"}
@@ -23,3 +23,9 @@ async def upload(file: UploadFile):
     name = f"{uuid.uuid4().hex}{ext}"
     url = await storage.save(name, data, file.content_type or "application/octet-stream")
     return {"url": url, "filename": name, "size": len(data), "storage": storage.name}
+
+
+@router.delete("")
+async def remove(url: str):
+    """Delete a file we uploaded (used when an unsaved upload is discarded). Bundled images and foreign URLs are left alone."""
+    return {"deleted": await delete_by_url(url)}

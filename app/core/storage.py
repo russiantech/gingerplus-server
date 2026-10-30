@@ -12,6 +12,7 @@ import datetime as dt
 import hashlib
 import hmac
 import logging
+import re
 from pathlib import Path
 from urllib.parse import quote
 
@@ -169,3 +170,19 @@ def get_storage() -> Storage:
     except Exception as exc:  # mis-configured backend must not take the API down
         log.error("storage backend %s misconfigured: %s — using local", backend, exc)
         return LocalStorage()
+
+
+_OUR_KEY = re.compile(r"^[0-9a-f]{32}\.(jpg|png|webp|svg|gif|pdf)$")
+
+
+async def delete_by_url(url: str) -> bool:
+    """Best-effort removal of a file we uploaded (names are `<uuid4hex>.<ext>`). Never touches bundled /images/ assets or foreign URLs."""
+    try:
+        key = url.split("?")[0].rstrip("/").rsplit("/", 1)[-1]
+        if not _OUR_KEY.match(key) or "/images/" in url:
+            return False
+        await get_storage().delete(key)
+        return True
+    except Exception:  # cleanup must never fail the user's save
+        log.warning("could not delete %s", url)
+        return False

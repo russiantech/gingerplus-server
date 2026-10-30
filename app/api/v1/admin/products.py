@@ -54,7 +54,10 @@ async def delete_product(product_id: uuid.UUID, db: DB):
     if used:  # keep history intact: archive instead
         p.is_active = False
         return Message(detail="Product has order history, so it was archived (hidden) instead of deleted.")
+    imgs = set(catalog_service._all_images(p))
     await db.delete(p)
+    await db.flush()
+    await catalog_service.release_images(db, imgs)
     return Message(detail="Product deleted")
 
 

@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import or_, select
+from sqlalchemy import String, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -61,6 +61,27 @@ async def _sync_variants(db: AsyncSession, product: Product, items: list[Variant
             product.variants.remove(v)
 
 
+def _all_images(product: Product) -> list[str]:
+    return [u for u in [*(product.images or []), *(v.image_url for v in product.variants)] if u]
+
+
+async def release_images(db: AsyncSession, urls: set[str]) -> None:
+    """Delete files that were removed from a product, but only if they live in our storage and nothing else still uses them."""
+    from app.core.storage import delete_by_url
+    for u in urls:
+        still = (await db.execute(select(Product.id).where(Product.images.cast(String).contains(u)).limit(1))).first() or \
+                (await db.execute(select(ProductVariant.id).where(ProductVariant.image_url == u).limit(1))).first()
+        if not still:
+            await delete_by_url(u)
+
+
+async def _reload(db: AsyncSession, product_id: uuid.UUID) -> Product:
+    """Re-read with every relationship eagerly loaded: serialising a product must never trigger lazy IO (MissingGreenlet)."""
+    q = (select(Product).where(Product.id == product_id).options(selectinload(Product.variants).selectinload(ProductVariant.tiers))
+         .execution_options(populate_existing=True))
+    return (await db.execute(q)).unique().scalar_one()
+
+
 async def create_product(db: AsyncSession, data: ProductIn) -> Product:
     payload = data.model_dump(exclude={"variants", "slug"})
     product = Product(**payload, slug=await unique_slug(db, Product, data.slug or data.name))
@@ -68,12 +89,12 @@ async def create_product(db: AsyncSession, data: ProductIn) -> Product:
     await db.flush()
     await _sync_variants(db, product, data.variants)
     await db.flush()
-    await db.refresh(product)
-    return product
+    return await _reload(db, product.id)
 
 
 async def update_product(db: AsyncSession, product: Product, data: ProductUpdate) -> Product:
     patch = data.model_dump(exclude_unset=True, exclude={"variants", "slug"})
+    old_images = set(_all_images(product))
     for k, v in patch.items():
         setattr(product, k, v)
     if data.slug:
@@ -81,7 +102,8 @@ async def update_product(db: AsyncSession, product: Product, data: ProductUpdate
     if data.variants is not None:
         await _sync_variants(db, product, data.variants)
     await db.flush()
-    await db.refresh(product)
+    product = await _reload(db, product.id)
+    await release_images(db, old_images - set(_all_images(product)))
     return product
 
 

@@ -258,3 +258,19 @@ CATEGORIES = [
 LAGOS = {"Lagos": (2500, 1, 2)}
 SW = {s: (3500, 2, 3) for s in ["Ogun", "Oyo", "Osun", "Ondo", "Ekiti"]}
 REMOTE = {s: (7500, 5, 7) for s in ["Borno", "Yobe", "Adamawa", "Taraba", "Sokoto", "Zamfara", "Kebbi", "Bayelsa"]}
+
+
+# ---- real product photography (served from the client's /images folder) ----
+PRODUCT_IMAGES = {
+    "turmeric": ["/images/products/turmeric.webp", "/images/products/turmeric-pack.jpg", "/images/products/turmeric-stack.jpg", "/images/products/turmeric-honey-pair.jpg"],
+    "honey": ["/images/products/honey.webp", "/images/products/honey-pack.jpg", "/images/products/honey-stack.jpg", "/images/products/turmeric-honey-pair.jpg"],
+    "guarana": ["/images/products/guarana.webp", "/images/products/guarana-pack.jpg", "/images/products/guarana-stack.jpg", "/images/products/guarana-hand.jpg"],
+}
+HERO_IMAGES = ["/images/hero/slide-1.webp", "/images/hero/slide-2.webp", "/images/hero/slide-3.webp"]
+PAGE_BANNERS = {
+    "about-us": "/images/banners/turmeric-packs.jpg", "bars-mixers": "/images/banners/guarana-packs.jpg", "events-gifting": "/images/banners/honey-packs.jpg",
+    "wholesale": "/images/banners/warehouse-stack.jpg", "become-a-distributor": "/images/banners/warehouse-turmeric.jpg", "our-ingredients": "/images/banners/turmeric-packs.jpg",
+    "health-benefits": "/images/banners/honey-packs.jpg",
+}
+FLAVOR_BANNER = {"turmeric": "/images/banners/turmeric-packs.jpg", "honey": "/images/banners/honey-packs.jpg", "guarana": "/images/banners/guarana-packs.jpg"}
+BLOG_COVERS = ["/images/banners/honey-packs.jpg", "/images/banners/turmeric-packs.jpg", "/images/banners/guarana-packs.jpg", "/images/banners/warehouse-honey.jpg", "/images/banners/warehouse-stack.jpg"]

@@ -62,13 +62,13 @@ async def seed_catalog(db: AsyncSession) -> None:
     for spec in D.PRODUCTS:
         if await _exists(db, Product, slug=spec["slug"]):
             continue
-        p = Product(**spec, category_id=cats["ginger-drinks"].id, images=[f"/images/products/{spec['flavor']}-350ml.svg", f"/images/products/{spec['flavor']}-125ml.svg"])
+        p = Product(**spec, category_id=cats["ginger-drinks"].id, images=list(D.PRODUCT_IMAGES[spec["flavor"]]))
         db.add(p)
         await db.flush()
         for s in D.SIZES:
             v = ProductVariant(product_id=p.id, sku=f"SR-GP-{spec['flavor'][:3].upper()}-{s['size'].upper()}", label=s["label"], size_label=s["size"],
                                unit_count=s["count"], pack_equivalent=Decimal(1), price=Decimal(s["price"]), stock=200, sort_order=s["sort"],
-                               image_url=f"/images/products/{spec['flavor']}-{s['size']}.svg")
+                               image_url=None)  # variants inherit the product gallery unless an admin sets their own photo
             v.tiers = [PriceTier(min_qty=s["tier"][0], price=Decimal(s["tier"][1]), label="Wholesale (20+ packs)")]
             db.add(v)
 
@@ -112,6 +112,32 @@ async def seed_content(db: AsyncSession) -> None:
         db.add(Promotion(name="Welcome 10%", code="WELCOME10", description="10% off your first order", value=Decimal(10), max_discount=Decimal(5000), is_active=True))
 
 
+def _legacy(u: str | None) -> bool:
+    return not u or (u.startswith("/images/") and u.endswith(".svg"))
+
+
+async def sync_seed_images(db: AsyncSession) -> None:
+    """Replace the old placeholder artwork with the real photos — only where a record still points at a placeholder, so anything an admin uploaded is never touched."""
+    for p in (await db.execute(select(Product))).unique().scalars():
+        if p.flavor in D.PRODUCT_IMAGES and (not p.images or all(_legacy(u) for u in p.images)):
+            p.images = list(D.PRODUCT_IMAGES[p.flavor])
+        for v in p.variants:
+            if v.image_url and _legacy(v.image_url):
+                v.image_url = None
+    for i, h in enumerate((await db.execute(select(HeroSlide).order_by(HeroSlide.sort_order))).scalars()):
+        if _legacy(h.image_url):
+            h.image_url = D.HERO_IMAGES[i % len(D.HERO_IMAGES)]
+    for pg in (await db.execute(select(Page))).scalars():
+        if not pg.banner_image_url and pg.slug in D.PAGE_BANNERS:
+            pg.banner_image_url = D.PAGE_BANNERS[pg.slug]
+    for r in (await db.execute(select(Recipe))).scalars():
+        if _legacy(r.image_url):
+            r.image_url = D.FLAVOR_BANNER.get(r.featured_flavor or "", D.FLAVOR_BANNER["turmeric"])
+    for i, b in enumerate((await db.execute(select(BlogPost).order_by(BlogPost.created_at))).scalars()):
+        if _legacy(b.cover_image_url):
+            b.cover_image_url = D.BLOG_COVERS[i % len(D.BLOG_COVERS)]
+
+
 async def seed_all() -> None:
     async with SessionLocal() as db:
         roles = await seed_roles(db)
@@ -119,6 +145,8 @@ async def seed_all() -> None:
         await seed_catalog(db)
         await seed_shipping(db)
         await seed_content(db)
+        await db.flush()
+        await sync_seed_images(db)
         await db.commit()
     log.info("Seed complete")
 

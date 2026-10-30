@@ -65,7 +65,6 @@ class TrailingSlashMiddleware:
 def create_app() -> FastAPI:
     app = FastAPI(title=settings.APP_NAME, version="1.0.0", lifespan=lifespan,
                   docs_url=None if settings.is_production else "/docs", redoc_url=None, openapi_url=f"{settings.API_V1_PREFIX}/openapi.json")
-    app.add_middleware(CORSMiddleware, allow_origins=settings.CORS_ORIGINS, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
     app.add_middleware(TrailingSlashMiddleware)
 
     @app.exception_handler(StarletteHTTPException)
@@ -86,6 +85,9 @@ def create_app() -> FastAPI:
         resp.headers.setdefault("X-Frame-Options", "DENY")
         resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
         return resp
+
+    # CORS must be the OUTERMOST layer so even 500/503 responses carry CORS headers (otherwise browsers report them as "network errors")
+    app.add_middleware(CORSMiddleware, allow_origins=settings.CORS_ORIGINS, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
     @app.get("/health", tags=["system"])
     async def health():
