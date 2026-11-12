@@ -4,6 +4,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -62,10 +63,15 @@ class TrailingSlashMiddleware:
         await self.app(scope, receive, send)
 
 
+_P = settings.API_V1_PREFIX
+_CACHEABLE = tuple(f"{_P}{x}" for x in ("/catalog/products", "/catalog/categories", "/catalog/promotions", "/content/", "/stores"))
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title=settings.APP_NAME, version="1.0.0", lifespan=lifespan,
                   docs_url=None if settings.is_production else "/docs", redoc_url=None, openapi_url=f"{settings.API_V1_PREFIX}/openapi.json")
     app.add_middleware(TrailingSlashMiddleware)
+    app.add_middleware(GZipMiddleware, minimum_size=600, compresslevel=5)  # JSON/HTML shrink 70-90%
 
     @app.exception_handler(StarletteHTTPException)
     async def _http_exc(request: Request, exc: StarletteHTTPException):
@@ -84,6 +90,10 @@ def create_app() -> FastAPI:
         resp.headers.setdefault("X-Content-Type-Options", "nosniff")
         resp.headers.setdefault("X-Frame-Options", "DENY")
         resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        if request.method == "GET" and resp.status_code == 200 and "authorization" not in request.headers and request.url.path.startswith(_CACHEABLE):
+            resp.headers.setdefault("Cache-Control", "public, max-age=30, stale-while-revalidate=300")  # public catalogue/CMS reads only
+        elif request.url.path.startswith("/static/"):
+            resp.headers.setdefault("Cache-Control", "public, max-age=2592000, immutable")  # uploads are content-addressed (uuid names)
         return resp
 
     # CORS must be the OUTERMOST layer so even 500/503 responses carry CORS headers (otherwise browsers report them as "network errors")
